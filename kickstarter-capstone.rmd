@@ -1,0 +1,525 @@
+---
+title: "Kickstarter Project Capstone"
+author: "Rob Shipley"
+date: "2025-12-8"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Introduction and Overview
+
+The goal for this project is to ingest the Kickstarter Project dataset and evaluate to determine if it provides adequate data to establish a predictive model for determining if a project will succeed or fail. The initial analysis will evaluate the dataframe to assess the columns and categories. This initial insight will be used to perform additional normalization and regularization. The final intent it to apply two models to the dataframe using a train-test split to see if the results are worthy of assisting future projects to assess if a final Kickstarter fund raising activity is likely to be successful. When the dataset is converted into a dataframe, we will need to remove the Goal labeled column. If it is left in the dataframe, the model can essentially cheat to achieve a near 100% accuracy by determining if the goal is met by comparing the pledge column.
+
+Initial research indicates that enough data is available to perform a 80/20 train-test split. It contains over 300K rows, so that justifies the split since enough data is available for the train set. The challenge is to determine if the data frame contains enough relevant observations to assess if a Kickstarter project is likely to succeed or fail. If we are close to 50%, then we know the feature columns lack enough context to proceed with using the data to indicate success or failure outcomes. 
+
+A key challenge will be the project Names column of the kickstarter projects only provides the title and lacks any significant context. Because of this, sentiment analysis will not be used. Instead, we need to determine the best predictive model with only the categories, timeframe, pledge amount and number of backers as variables.
+
+## Project Objectives
+
+- Analyze the kickstarter dataframe to determine context
+- Perform data wrangling to normalize and clean the dataframe
+- Generate graphs to provide insight into the column features and relevance to the outcome
+- Create a test-train split that can be used for modeling
+- Apply ranger random forest and logistic regression models and determine success/fail prediction accuracy
+- Demonstrate understanding of the outcome and provide a conclusion
+
+# Methodology and Analysis
+
+## Key Steps
+
+The following key steps will be used during this project:
+
+1. Load the libraries needed for analysis
+2. Download the dataset, assigning datatypes to columns
+3. Run a basic analysis of the kickstarter dataset to identify columns and summary of content
+4. Apply graphs to the dataset for initial analysis
+5. Clean the memory for optimal performance
+6. Apply data factorization to the kickstarter dataframe
+6. Split the kickstarter dataset into train and test sets
+7. Store the train and test sets in memory
+8. Apply ranger random forest  
+9. Apply normalization and regularization for logistic regression
+10. Apply logistic regression models to the train set
+11. Predict the outcome for test sets
+12. Calculate the accuracy for test sets
+13. Compare the two models
+14. Provide a conclusion
+
+# R Code Analysis of Kickstarter Dataset
+
+## Load the Libraries
+
+```{r libraries}
+
+#-------------------------------------------------------- 
+# Load needed libraries
+#-------------------------------------------------------- 
+
+if(!require(dplyr)) install.packages("dplyr", repos = "https://cloud.r-project.org")
+library(dplyr)
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+library(caret)
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+library(tidyverse)
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+library(ggplot2)
+if(!require(ranger)) install.packages("ranger", repos = "http://cran.us.r-project.org")
+library(ranger)
+
+
+
+```
+
+## Data Loading and Preparation
+
+```{r data-load}
+
+#-------------------------------------------------------- 
+# Read Kickstarter dataset 
+#-------------------------------------------------------- 
+kickstarter_ds <- read_csv("kickstarter_projects.csv")
+
+#-------------------------------------------------------- 
+# Create a column with time between Launch and Deadline
+# This is useful to determine how much time is allowed to raise funds
+#-------------------------------------------------------- 
+kickstarter_ds$DeadlineTime <- difftime(kickstarter_ds$Deadline, kickstarter_ds$Launched, units = "hours")
+head(kickstarter_ds)
+
+#-------------------------------------------------------- 
+# Show unique States of all Kickstarter projects
+# Remove all State except Successful and Failed.
+# The other states of projects are not useful for determining if Successful or Failed
+#-------------------------------------------------------- 
+kickstarter_unique_state <- unique(kickstarter_ds$State)
+print(kickstarter_unique_state)
+
+kickstarter_ds <- filter(kickstarter_ds, State != "Canceled")
+kickstarter_ds <- filter(kickstarter_ds, State != "Live")
+kickstarter_ds <- filter(kickstarter_ds, State != "Suspended")
+kickstarter_state <- unique(kickstarter_ds$State)
+print(kickstarter_state)
+
+#-------------------------------------------------------- 
+# Run a summary and view the column Headers
+# View the columns and determine context
+#-------------------------------------------------------- 
+summary(kickstarter_ds)
+head(kickstarter_ds)
+
+```
+
+## Basic Analysis of the Kickstarter Dataset
+
+```{r data-exploration}
+
+#-------------------------------------------------------- 
+# Plot a bargraph of the count of Successful projects per Category
+# Compares the number of successful vs. failed projects
+#--------------------------------------------------------
+ggplot(kickstarter_ds, aes(x = State)) +
+  geom_bar(fill = "darkgray") +
+  labs(title = "Number of Projects by State", x = "Project State", y = "Count") +
+  theme_minimal()
+
+#-------------------------------------------------------- 
+# Evaluate unique values for each column, Country, Category and Subcategory
+# Show what is unique for each of the categorical columns
+#-------------------------------------------------------- 
+
+kickstarter_unique_country <- unique(kickstarter_ds$Country)
+print(kickstarter_unique_country)
+kickstarter_unique_category <- unique(kickstarter_ds$Category)
+print(kickstarter_unique_category)
+kickstarter_unique_subcategory <- unique(kickstarter_ds$Subcategory)
+print(kickstarter_unique_subcategory)
+
+#-------------------------------------------------------- 
+# Take a look at Failed projects 
+#-------------------------------------------------------- 
+failed_projects <- kickstarter_ds %>% filter(State == "Failed")
+failed_projects$Year <- year(failed_projects$Launched)
+# Count failed projects by Year and Category
+failed_by_year_category <- failed_projects %>%
+  group_by(Year, Category) %>%
+  summarise(Count = n())
+print(failed_by_year_category)
+
+#-------------------------------------------------------- 
+# Plot a stack bar of count of Failed projects per Year
+#
+# Plot themes assisted by Claude 4 
+# (Sonnet 4.5) by Anthropic (2024)
+# https://claude.ai
+#--------------------------------------------------------
+
+ggplot(failed_by_year_category, aes(x = Year, y = Count, fill = Category)) +
+  geom_bar(stat = "identity" , color = "black") + # Border for each Category
+  labs(
+    title = "Failed Kickstarter Projects Per Year by Category",
+    x = "Year",
+    y = "Number of Failed Projects",
+    fill = "Category"
+  ) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Year lables at 45 degrees 
+  scale_x_continuous(breaks = seq(min(failed_by_year_category$Year), 
+                                  max(failed_by_year_category$Year), 
+                                  by = 1))
+
+#-------------------------------------------------------- 
+# Take a look at Successful projects
+#-------------------------------------------------------- 
+
+successful_projects <- kickstarter_ds %>% filter(State == "Successful")
+successful_projects$Year <- year(successful_projects$Launched)
+
+successful_by_year_category <- successful_projects %>%
+  group_by(Year, Category) %>%
+  summarise(Count = n())
+print(successful_by_year_category)
+
+#-------------------------------------------------------- 
+# Plot a stack bar of count of Successful projects per Year
+#
+# Plot themes assisted by Claude 4 
+# (Sonnet 4.5) by Anthropic (2024)
+# https://claude.ai
+#--------------------------------------------------------
+
+ggplot(successful_by_year_category, aes(x = Year, y = Count, fill = Category)) +
+  geom_bar(stat = "identity" , color = "black") + # stack with black borders per category
+  labs(
+    title = "Successful Kickstarter Projects Per Year by Category",
+    x = "Year",
+    y = "Number of Successful Projects",
+    fill = "Category" # Legend
+  ) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +# Rotate 45 degree labels for x-axis
+  scale_x_continuous(breaks = seq(min(successful_by_year_category$Year), 
+    max(successful_by_year_category$Year), 
+    by = 1))
+
+#-------------------------------------------------------- 
+# Plot a bar graph of the count of Successful projects per Category
+#--------------------------------------------------------
+
+successful_by_category <- kickstarter_ds %>%
+  filter(tolower(State) == "successful") %>%
+  group_by(Category) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+ggplot(successful_by_category, aes(x = reorder(Category, Count), y = Count)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(x = "Category", y = "Successful Project Count") +
+  theme_minimal()
+
+
+#-------------------------------------------------------- 
+# Evaluate the Success percentage per Category
+#--------------------------------------------------------
+
+success_rate_per_category <- kickstarter_ds %>%
+  group_by(Category) %>%
+  summarise(
+    Total = n(),
+    Successful = sum(tolower(State) == "successful"),
+    Success_Percentage = (Successful / Total) * 100
+  ) %>%
+  arrange(desc(Success_Percentage))
+
+ggplot(success_rate_per_category, aes(x = Success_Percentage, y = reorder(Category, Success_Percentage))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Success %", y = "Category") +
+  theme_minimal()
+
+#-------------------------------------------------------- 
+# Now evaluate the Success percentage per Country
+#--------------------------------------------------------
+success_rate_by_country <- kickstarter_ds %>%
+  group_by(Country) %>%
+  summarise(
+    Total = n(),
+    Successful = sum(tolower(State) == "successful"),
+    Success_Percentage = (Successful / Total) * 100
+  ) %>%
+  arrange(desc(Success_Percentage))
+
+#-------------------------------------------------------- 
+# Plot a bar graph of the percent Successful projects per Country
+#--------------------------------------------------------
+ggplot(success_rate_by_country, aes(x = Success_Percentage, y = reorder(Country, Success_Percentage))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Success %", y = "Country") +
+  theme_minimal()
+
+
+```
+
+## Clean up Memory
+
+```{r memory-clean}
+
+#-------------------------------------------------------- 
+# Clean up some memory from successful and failed projects datasets
+#--------------------------------------------------------
+rm(failed_projects,successful_projects)
+
+
+```
+
+## Data Model Preparation and Factorization
+
+```{r data-factorization}
+
+#-------------------------------------------------------- 
+# Modify the Kickstarter dataset to a dataframe for preparing for applying models
+# Drop columns that have no relevance to results.
+#-------------------------------------------------------- 
+kickstarter_df <- select(kickstarter_ds, Category, Country, Pledged, Backers,DeadlineTime, State)
+head(kickstarter_df)
+
+
+#-------------------------------------------------------- 
+# To apply the data model the State needs to be changed to a binary 0 or 1 factor
+# If you look at the columns it is changed to fct type
+#-------------------------------------------------------- 
+
+kickstarter_df$State <- factor(
+  ifelse(tolower(kickstarter_df$State) == "successful", 1, 0),
+  levels = c(0, 1),
+  labels = c("Failed", "Successful")
+)
+
+#-------------------------------------------------------- 
+# To apply the data models we need to change the character columns to factors
+#-------------------------------------------------------- 
+
+kickstarter_df$Category <- as.factor(kickstarter_df$Category)
+kickstarter_df$Country <- as.factor(kickstarter_df$Country)
+
+#-------------------------------------------------------- 
+# Get rid of data that is NA within the Kickstarter dataframe
+#-------------------------------------------------------- 
+
+kickstarter_df <- na.omit(kickstarter_df)
+summary(kickstarter_df)
+
+
+```
+
+## Data Split into Test and Train
+```{r data-split}
+
+
+#-------------------------------------------------------- 
+# It is going to be an 80-20 split for train test sets since we have enough data
+#-------------------------------------------------------- 
+
+set.seed(3)  # Set this so split is repeatable.
+train_index <- createDataPartition(kickstarter_df$State, p = 0.8, list = FALSE)
+train_data <- kickstarter_df[train_index, ]
+test_data <- kickstarter_df[-train_index, ]
+
+#-------------------------------------------------------- 
+# Evaluate another summary and column heads for the train set
+#-------------------------------------------------------- 
+
+summary(train_data)
+head(train_data)
+
+```
+
+## Apply the Random Forest Ranger Model to Train and Determine Accuracy
+
+```{r data-ranger}
+
+#-------------------------------------------------------- 
+# Model 1: Random Forest Ranger Model
+#-------------------------------------------------------- 
+# For random forest ranger model to work, we need to define the controls and tuning
+# Going to use cross-validation method, 10 fold, keep the probability estimates
+# For tuning, mtry is generally sqrt of feature count, so 3 is good, split rule gini is default, 1 is minumum size
+#-------------------------------------------------------- 
+
+train_control <- trainControl(
+  method = "cv",       # Using Cross-validation       
+  number = 10,         # Use 10 fold to increase accuracy        
+  classProbs = TRUE    # Get probability estimates      
+)
+
+tune_grid <- expand.grid(
+  mtry = 3,            # Number of column features to use at a time
+  splitrule = "gini",  # Default index for split
+  min.node.size = 1    # This is the minimum columns possible for classification
+)
+
+#-------------------------------------------------------- 
+# Run the model on train set using control and tuning parameters
+#-------------------------------------------------------- 
+
+ranger_model <- train(
+  State ~ Category + Country + Pledged + Backers + DeadlineTime,
+  data = train_data,
+  method = "ranger",          # Using ranger random forest algorithm
+  trControl = train_control,
+  tuneGrid = tune_grid,
+  num.trees = 100,            # 100 trees to start, can increase to improve accuracy but takes longer
+  importance = "impurity"     # Determine the importance of each variable to decision tree
+)
+
+
+#-------------------------------------------------------- 
+# Show the results for the model parameters
+#-------------------------------------------------------- 
+print(ranger_model)
+
+#-------------------------------------------------------- 
+# Show the accuracy for train set
+#-------------------------------------------------------- 
+cat("Accuracy:", ranger_model$results$Accuracy)
+
+```
+
+## Apply Ranger Model to Test Set and Determine Accuracy
+
+```{r ranger-test}
+
+#-------------------------------------------------------- 
+# ranger_predict will make a prediction on success failed projects in test set
+#-------------------------------------------------------- 
+
+ranger_predict <- predict(ranger_model, newdata = test_data)
+summary(ranger_predict)
+
+#-------------------------------------------------------- 
+# Now apply the tuned ranger model to the test set
+#-------------------------------------------------------- 
+
+ranger_predict <- factor(ranger_predict, levels = levels(test_data$State))
+
+#-------------------------------------------------------- 
+# Run the confusion Matrix to determine if prediction is correct
+#--------------------------------------------------------
+
+ranger_confusionmatrix <- confusionMatrix(ranger_predict, test_data$State)
+print(ranger_confusionmatrix)
+
+#-------------------------------------------------------- 
+# Show the accuracy result for the ranger model predictions
+#--------------------------------------------------------
+
+cat("Accuracy:", ranger_confusionmatrix$overall['Accuracy'])
+
+
+```
+
+## Apply the Logistic Regression Model to the Train Set
+
+```{r logistic-model}
+
+#-------------------------------------------------------- 
+# Model 2: Logistic Regression Model
+#-------------------------------------------------------- 
+
+#-------------------------------------------------------- 
+# Run the logistic model on the train set
+# We are going to suppress the warnings because we know the model will be highly successful with some Pledge amounts
+#-------------------------------------------------------- 
+
+logistic_model <- suppressWarnings(glm(State ~ ., data = train_data, family = binomial))
+
+#-------------------------------------------------------- 
+# Apply the logistic model to the test set
+# The State is a 0 and 1s factor, predict based on near value
+#
+# factor assisted by Claude 4 
+# (Sonnet 4.5) by Anthropic (2024)
+# https://claude.ai
+#-------------------------------------------------------- 
+logistic_predict <- predict(logistic_model, test_data, type = "response")
+logistic_predict <- factor(ifelse(logistic_predict > 0.5, "Successful", "Failed"),
+                        levels = c("Failed", "Successful"))
+
+summary(logistic_predict)
+
+```
+
+## Apply Logistic Regression Model to Test Set and Determine Accuracy
+
+
+```{r logistic-test}
+
+#-------------------------------------------------------- 
+# Run the confusion matrix to determine if prediction is correct with the test set
+#--------------------------------------------------------
+logistic_confusionmatrix <- confusionMatrix(logistic_predict, test_data$State)
+print(logistic_confusionmatrix)
+
+#-------------------------------------------------------- 
+# Show the accuracy result for the logistic regression model
+#--------------------------------------------------------
+
+cat("Accuracy:", logistic_confusionmatrix$overall['Accuracy'])
+
+
+```
+
+
+## Compare Accuracy for Ranger and Logistic Regresssion Models
+
+```{r compare-model}
+
+#-------------------------------------------------------- 
+# Graph to compare models
+#
+# model_compare assisted by Claude 4 
+# (Sonnet 4.5) by Anthropic (2024)
+# https://claude.ai
+#--------------------------------------------------------
+
+model_compare <- data.frame(
+  Model = c("Ranger", "Logistic Regression"),
+  Accuracy = c(
+    ranger_confusionmatrix$overall['Accuracy'] * 100,    # Ranger accuracy as percentage
+    logistic_confusionmatrix$overall['Accuracy'] * 100   # Logistic regression accuracy as percentage
+
+  )
+)
+
+ggplot(model_compare, aes(x = Model, y = Accuracy)) +
+  geom_bar(stat = "identity") +
+  ylim(0, 100) +
+  labs(x = "Model", y = "Accuracy (%)") +
+  theme_minimal()
+
+
+
+```
+
+
+# Results
+
+This project successfully determined that the Kickstarter dataset has enough column features to apply models to determine if a project has a likelihood of success. While the accuracy for the models was below 90%, there is significant variance in the categories to create a model that could assist kickstarter project predictions to increase success. It is likely that increasing folding or using another random forest algorithm is possible to increase the accuracy of predictions. The ranger and logistic regression models performed well, however they were scaled back to reduce the amount of time for convergence.
+
+# Conclusion and Summary
+
+The random forest ranger algorithm performed well on the kickstarter dataset. The logistic regression algorithm can be used but appears it might have lower accuracy results. There was no expectation that the column features would be adequate to predict project success or failure. However, it was fascinating results considering we removed the Goal column feature to prevent the algorithms from having the ability to cheat and approach 100% accuracy.
+
+## Limitations
+
+The capstone was limited to only using two data models. There is no dynamic tuning, dummy coding or one hot coding applied. The results are likely to significantly improve with some level of normalization, regularization, and adjusting the tuning and control parameters. The column for the Name of the projects was removed too. If there was additional context about the nature of the project, it is likely the prediction of the possible project success could drastically improve by introducing additional context and using sentiment analysis.
+
+## Future Work
+
+Applying the insights from this capstone project can provide further analysis of similar data sets to predict success. This analysis of the kickstarter dataset can enhance the ability to consult project owners about how to adjust there probability of success by adjusting the project category type, amount to set for pledge per backer, country of origin for raising money and adjusting the velocity of the project.
+
+# References
+
+Anthropic. (2024). Claude 4 (Sonnet 4.5) [Large language model]. https://claude.ai
+
+
